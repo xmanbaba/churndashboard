@@ -1,175 +1,210 @@
+# =========================================================
+# Telco Executive Dashboard - AI-Driven Forecasting
+# =========================================================
+# This Streamlit app demonstrates how executives in a Telco
+# can use AI + Data-driven insights to simulate ARPU and
+# churn rate scenarios, and understand their revenue impact.
+# =========================================================
+
 import streamlit as st
 import pandas as pd
 import numpy as np
-import plotly.graph_objects as go
+import plotly.express as px
 from io import BytesIO
 
-# ------------------------------
-# Simulate Base Data
-# ------------------------------
-months = pd.date_range(start="2024-01-01", periods=12, freq="M")
-np.random.seed(42)
+# --------------------------
+# Page Configuration
+# --------------------------
+st.set_page_config(
+    page_title="AI-Driven Telco Dashboard",
+    layout="wide"
+)
 
-arpu = np.random.uniform(4.5, 6.5, 12)                      # base ARPU ($)
-churn_rate = np.random.uniform(2, 5, 12)                    # base churn %
-customer_base = 500_000                                     # starting customers
+# --------------------------
+# Title and Introduction
+# --------------------------
+st.title("📊 Telco Executive Dashboard: ARPU & Churn Forecasting")
 
-customers = [customer_base]
-for i in range(1, 12):
-    churned = customers[i-1] * (churn_rate[i-1] / 100)
-    customers.append(customers[i-1] - churned)
+st.markdown("""
+Welcome to the **AI-Driven Telco Dashboard**.  
+This interactive tool is designed for executives to:
+- Understand the **impact of ARPU and Churn on revenue**
+- Simulate **different business scenarios**
+- Download results for **boardroom reporting**
 
-revenue = [arpu[i] * customers[i] for i in range(12)]
+💡 This demo is an example of how **AI leadership** can enable faster, data-driven decision-making.
+""")
 
-base_data = pd.DataFrame({
-    "Month": months.strftime("%b-%Y"),
-    "ARPU ($)": arpu.round(2),
-    "Churn Rate (%)": churn_rate.round(2),
-    "Customers": np.round(customers).astype(int),
-    "Revenue ($)": np.round(revenue, 2)
+# =========================================================
+# SIDEBAR - Simulation Controls
+# =========================================================
+st.sidebar.header("⚙️ Simulation Controls")
+
+# Forecast horizon
+months = st.sidebar.slider(
+    "Forecast Horizon (Months)",
+    min_value=6,
+    max_value=36,
+    value=12
+)
+
+# Base ARPU and growth
+base_arpu = st.sidebar.number_input(
+    "Base ARPU ($)",
+    min_value=2.0,
+    max_value=50.0,
+    value=8.0,
+    step=0.5
+)
+
+arpu_growth = st.sidebar.slider(
+    "ARPU Monthly Growth Rate (%)",
+    min_value=-5.0,
+    max_value=10.0,
+    value=2.0
+)
+
+# Churn assumptions
+base_churn = st.sidebar.slider(
+    "Base Monthly Churn Rate (%)",
+    min_value=1.0,
+    max_value=15.0,
+    value=5.0
+)
+
+churn_trend = st.sidebar.slider(
+    "Churn Monthly Change (bps)",
+    min_value=-50,
+    max_value=50,
+    value=-10
+)
+
+# Subscriber base
+starting_subs = st.sidebar.number_input(
+    "Starting Subscribers (Millions)",
+    min_value=0.1,
+    max_value=50.0,
+    value=5.0
+)
+
+# =========================================================
+# FORECAST MODEL
+# =========================================================
+months_range = np.arange(1, months + 1)
+
+# ARPU projection
+arpu = [
+    base_arpu * ((1 + arpu_growth / 100) ** (m - 1))
+    for m in months_range
+]
+
+# Churn projection (bps = basis points, 0.01%)
+churn = [
+    max(0.1, base_churn + (m - 1) * (churn_trend / 100))
+    for m in months_range
+]
+
+# Subscriber base evolution
+subscribers = [starting_subs * 1_000_000]
+for m in range(1, months):
+    prev_subs = subscribers[-1]
+    retained = prev_subs * (1 - churn[m - 1] / 100)
+    subscribers.append(retained)
+
+# Revenue calculation
+revenue = [
+    subscribers[i] * arpu[i]
+    for i in range(months)
+]
+
+# Assemble into DataFrame
+df = pd.DataFrame({
+    "Month": months_range,
+    "ARPU ($)": np.round(arpu, 2),
+    "Churn Rate (%)": np.round(churn, 2),
+    "Subscribers": np.round(subscribers, 0),
+    "Revenue ($)": np.round(revenue, 0)
 })
 
-# ------------------------------
-# App layout
-# ------------------------------
-st.set_page_config(page_title="Telco Executive Dashboard", layout="wide")
-st.title("📊 Telco Executive Dashboard: ARPU, Churn & Revenue Impact")
-st.markdown("Interactive tool to show how **small changes** in ARPU or Churn affect customers & revenue.")
+# =========================================================
+# VISUALIZATIONS
+# =========================================================
+st.markdown("## 📈 Forecast Visualizations")
 
-tab1, tab2 = st.tabs(["🎛 Interactive What-If", "📈 Scenario Comparison & Export"])
+# Chart 1: ARPU
+fig1 = px.line(
+    df, x="Month", y="ARPU ($)",
+    title="ARPU Forecast",
+    markers=True
+)
 
-# ------------------------------
-# Tab 1: Interactive What-If (Churn + ARPU sliders)
-# ------------------------------
-with tab1:
-    st.subheader("Adjust ARPU and Churn (Live What-If)")
-    col1, col2 = st.columns(2)
-    with col1:
-        churn_adjust = st.slider("Adjust Churn Rate (%)  (add/subtract)", -2.0, 2.0, 0.0, 0.1)
-    with col2:
-        arpu_adjust_pct = st.slider("Adjust ARPU (%)  (increase/decrease)", -20.0, 20.0, 0.0, 0.5)
+# Chart 2: Churn Rate
+fig2 = px.line(
+    df, x="Month", y="Churn Rate (%)",
+    title="Churn Rate Forecast",
+    markers=True
+)
 
-    data = base_data.copy()
-    # apply ARPU change
-    data["Adj ARPU ($)"] = (data["ARPU ($)"] * (1 + arpu_adjust_pct / 100)).round(2)
-    # apply churn change
-    data["Adj Churn Rate (%)"] = (data["Churn Rate (%)"] + churn_adjust).clip(lower=0).round(2)
+# Chart 3: Revenue
+fig3 = px.line(
+    df, x="Month", y="Revenue ($)",
+    title="Revenue Forecast",
+    markers=True
+)
 
-    # compute customers and revenue under adjusted churn & ARPU
-    customers_adj = [customer_base]
-    for i in range(1, 12):
-        churned = customers_adj[i-1] * (data["Adj Churn Rate (%)"].iloc[i-1] / 100)
-        customers_adj.append(customers_adj[i-1] - churned)
-    data["Adj Customers"] = np.round(customers_adj).astype(int)
-    data["Adj Revenue ($)"] = (data["Adj ARPU ($)"] * data["Adj Customers"]).round(2)
+# Display charts in columns
+col1, col2, col3 = st.columns(3)
+col1.plotly_chart(fig1, use_container_width=True)
+col2.plotly_chart(fig2, use_container_width=True)
+col3.plotly_chart(fig3, use_container_width=True)
 
-    # Interactive Plot
-    fig = go.Figure()
-    fig.add_trace(go.Scatter(x=data["Month"], y=data["Adj ARPU ($)"],
-                             mode='lines+markers', name='Adj ARPU ($)', yaxis='y1'))
-    fig.add_trace(go.Scatter(x=data["Month"], y=data["Adj Churn Rate (%)"],
-                             mode='lines+markers', name='Adj Churn Rate (%)', yaxis='y2'))
-    # revenue as bubble sizes
-    fig.add_trace(go.Scatter(x=data["Month"], y=data["Adj ARPU ($)"],
-                             mode='markers',
-                             marker=dict(size=(data["Adj Revenue ($)"] / data["Adj Revenue ($)"].max()) * 40 + 5,
-                                         opacity=0.5),
-                             name='Adj Revenue ($)',
-                             text=[f"Revenue: ${r:,.0f}<br>Customers: {c:,}" for r, c in zip(data["Adj Revenue ($)"], data["Adj Customers"])],
-                             hoverinfo="text"))
+# =========================================================
+# FORECAST DATA TABLE
+# =========================================================
+st.markdown("## 📑 Forecast Data Table")
 
-    fig.update_layout(
-        title="What-If: Adj ARPU vs Adj Churn (Revenue shown as bubbles)",
-        xaxis=dict(title="Month"),
-        yaxis=dict(title="Adj ARPU ($)", side='left', color='blue'),
-        yaxis2=dict(title="Adj Churn Rate (%)", overlaying='y', side='right', color='red'),
-        hovermode="x unified",
-        template="plotly_white",
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
-    )
+st.dataframe(df, use_container_width=True)
 
-    st.plotly_chart(fig, use_container_width=True)
-    st.subheader("Data (Adjusted)")
-    st.dataframe(data[["Month", "Adj ARPU ($)", "Adj Churn Rate (%)", "Adj Customers", "Adj Revenue ($)"]], use_container_width=True)
+# =========================================================
+# EXCEL EXPORT
+# =========================================================
+def to_excel_bytes(df: pd.DataFrame) -> bytes:
+    """
+    Convert DataFrame into Excel bytes for download.
+    """
+    output = BytesIO()
+    with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
+        df.to_excel(writer, index=False, sheet_name="Scenarios")
+    output.seek(0)
+    return output.getvalue()
 
-# ------------------------------
-# Tab 2: Scenario Comparison + Export
-# ------------------------------
-with tab2:
-    st.subheader("Compare Churn Scenarios (with ARPU scenario)")
-    # allow a simple ARPU scenario to be superimposed
-    arpu_scenario = st.selectbox("Apply ARPU scenario to all churn scenarios:",
-                                options=["Base (No change)", "ARPU +5%", "ARPU -5%"],
-                                index=0)
-    arpu_scenario_map = {"Base (No change)": 0.0, "ARPU +5%": 5.0, "ARPU -5%": -5.0}
-    arpu_scenario_pct = arpu_scenario_map[arpu_scenario]
+excel_bytes = to_excel_bytes(df)
 
-    # churn scenarios
-    scenarios = {
-        "Low Churn (-1%)": -1.0,
-        "Base (No Change)": 0.0,
-        "High Churn (+1.5%)": 1.5
-    }
+st.download_button(
+    label="📥 Download Forecast Data (Excel)",
+    data=excel_bytes,
+    file_name="telco_forecast.xlsx",
+    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+)
 
-    scenario_frames = []
-    fig2 = go.Figure()
-    colors = ["green", "blue", "red"]
+# =========================================================
+# EXECUTIVE INSIGHTS
+# =========================================================
+st.markdown("## 🔎 Executive Insights")
 
-    for (name, churn_adj), color in zip(scenarios.items(), colors):
-        df = base_data.copy()
-        df["Adj ARPU ($)"] = (df["ARPU ($)"] * (1 + arpu_scenario_pct / 100)).round(2)
-        df["Adj Churn Rate (%)"] = (df["Churn Rate (%)"] + churn_adj).clip(lower=0).round(2)
+st.markdown(f"""
+- **Starting Subscribers:** {starting_subs:.1f}M  
+- **Final Subscribers after {months} months:** {df['Subscribers'].iloc[-1]:,.0f}  
+- **Final ARPU:** ${df['ARPU ($)'].iloc[-1]:.2f}  
+- **Total Revenue:** ${df['Revenue ($)'].sum():,.0f}  
 
-        customers_adj = [customer_base]
-        for i in range(1, 12):
-            churned = customers_adj[i-1] * (df["Adj Churn Rate (%)"].iloc[i-1] / 100)
-            customers_adj.append(customers_adj[i-1] - churned)
-        df["Adj Customers"] = np.round(customers_adj).astype(int)
-        df["Adj Revenue ($)"] = (df["Adj ARPU ($)"] * df["Adj Customers"]).round(2)
+💡 *Observation:*  
+Even small changes in **ARPU growth** or **Churn rate** have a massive 
+impact on revenue. This dashboard shows how executives can test different 
+scenarios and adjust **pricing, promotions, and retention strategies** 
+to sustain growth.
+""")
 
-        df_out = df[["Month", "Adj ARPU ($)", "Adj Churn Rate (%)", "Adj Customers", "Adj Revenue ($)"]].copy()
-        df_out["Scenario"] = name
-        scenario_frames.append(df_out)
-
-        fig2.add_trace(go.Scatter(x=df_out["Month"], y=df_out["Adj Revenue ($)"],
-                                  mode="lines+markers", name=name, line=dict(color=color)))
-
-    fig2.update_layout(title=f"Revenue Trajectories by Churn Scenario (ARPU scenario: {arpu_scenario})",
-                       xaxis=dict(title="Month"), yaxis=dict(title="Adj Revenue ($)"), template="plotly_white")
-    st.plotly_chart(fig2, use_container_width=True)
-
-    combined = pd.concat(scenario_frames, ignore_index=True)
-
-    st.subheader("Scenario Data")
-    st.dataframe(combined, use_container_width=True)
-
-    # ------------------------------
-    # Exports: Excel & HTML
-    # ------------------------------
-    st.subheader("Export Results")
-
-    def to_excel_bytes(df: pd.DataFrame) -> bytes:
-        output = BytesIO()
-        with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
-            df.to_excel(writer, index=False, sheet_name="Scenarios")
-            writer.save()
-        return output.getvalue()
-
-    excel_bytes = to_excel_bytes(combined)
-    st.download_button(
-        label="📊 Download Excel (.xlsx)",
-        data=excel_bytes,
-        file_name="telco_scenario_data.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    )
-
-    # HTML export (easy way to then Print -> Save as PDF locally)
-    html_report = combined.to_html(index=False)
-    st.download_button(
-        label="📄 Download HTML report (open in browser, Print → Save as PDF)",
-        data=html_report,
-        file_name="telco_scenario_data.html",
-        mime="text/html"
-    )
-
-    st.markdown("**Tip:** To create a PDF: open the downloaded HTML file in a browser and choose *Print → Save as PDF*.")
+# =========================================================
+# END OF APP
+# =========================================================
